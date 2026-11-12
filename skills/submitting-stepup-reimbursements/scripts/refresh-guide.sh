@@ -5,11 +5,13 @@
 #   bash scripts/refresh-guide.sh FES-UA       # one program
 #   bash scripts/refresh-guide.sh <url>        # any guide URL (PDF or web page); saved as "custom"
 # Programs: FES-UA, FTC-FES-EO (private school guide), PEP.
-# Saves per program in reference/: <PROGRAM>.txt .sha256 .source .fetched
+# Saves per program in ~/.reimbursaurus/reference/ (override with REIMBURSAURUS_DATA):
+#   <PROGRAM>.txt (or .pdf) .sha256 .source .fetched
+# No installs needed. Uses only bash, curl, and perl, which ship with macOS, Linux, and Git Bash.
+# pdftotext is used if present. Without it, PDF guides are saved as .pdf for Claude to read directly.
 set -uo pipefail
 
-HERE="$(cd "$(dirname "$0")/.." && pwd)"
-REF="$HERE/reference"
+REF="${REIMBURSAURUS_DATA:-$HOME/.reimbursaurus}/reference"
 mkdir -p "$REF"
 
 # program -> "primary URL|fallback URL". Primary is the newest known edition. If a new school year starts, find the new link on
@@ -23,60 +25,86 @@ guide_urls() {
   esac
 }
 
+for tool in curl perl; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "ERROR: '$tool' not found. It ships with macOS, Linux, and Git Bash, so this system is unusual." >&2; exit 2; }
+done
+
+hash_file() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+  else sha256sum "$1" | cut -d' ' -f1; fi
+}
+
+html_to_text() { # in out
+  perl -CSD -0777 -pe '
+    s/<(script|style|noscript)\b.*?<\/\1\s*>//gsi;
+    s/<(br|p|div|li|tr|h[1-6])\b[^>]*>/\n/gi;
+    s/<[^>]+>//g;
+    s/&nbsp;/ /g; s/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g; s/&rsquo;|&lsquo;/\x27/g; s/&rdquo;|&ldquo;/"/g;
+    s/&ndash;/\x{2013}/g; s/&mdash;/\x{2014}/g;
+    s/&#x([0-9a-f]+);/chr(hex $1)/gei; s/&#(\d+);/chr($1)/ge; s/&amp;/&/g;
+    s/[ \t]+/ /g; s/\n\s*\n+/\n/g;
+  ' "$1" > "$2"
+}
+
 # Downloads are untrusted data: fresh empty directory, nothing from it is ever executed.
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-fetch_text() { # url outfile -> 0 on success
-  local url="$1" out="$2" raw="$WORK/raw.bin"
-  curl -fsSL --max-time 90 -A "Mozilla/5.0 (stepup-skill)" -o "$raw" "$url" || return 1
+FETCH_ERR=""
+fetch_guide() { # url name -> sets KIND=txt|pdf, output in $WORK/<name>.<KIND>
+  local url="$1" name="$2" raw="$WORK/raw.bin"
+  rm -f "$WORK/$name.txt" "$WORK/$name.pdf"
+  curl -fsSL --max-time 90 -A "Mozilla/5.0 (reimbursaurus)" -o "$raw" "$url" || { FETCH_ERR="download failed"; return 1; }
   if head -c 5 "$raw" | grep -q '%PDF-'; then
-    pdftotext -layout "$raw" "$out" 2>/dev/null || return 1
+    if command -v pdftotext >/dev/null 2>&1 && pdftotext -layout "$raw" "$WORK/$name.txt" 2>/dev/null; then
+      KIND=txt
+    else
+      cp "$raw" "$WORK/$name.pdf"; KIND=pdf; return 0
+    fi
   else
-    python3 -I - "$raw" "$out" <<'PY' || return 1
-import sys, re, html
-from html.parser import HTMLParser
-class T(HTMLParser):
-    def __init__(s): super().__init__(); s.o=[]; s.skip=0
-    def handle_starttag(s,t,a):
-        if t in("script","style","noscript"): s.skip+=1
-        if t in("p","div","li","br","tr","h1","h2","h3","h4","h5","h6"): s.o.append("\n")
-    def handle_endtag(s,t):
-        if t in("script","style","noscript") and s.skip: s.skip-=1
-    def handle_data(s,d):
-        if not s.skip: s.o.append(d)
-p=T(); p.feed(open(sys.argv[1],encoding="utf-8",errors="replace").read())
-txt=html.unescape("".join(p.o)); txt=re.sub(r"[ \t]+"," ",txt); txt=re.sub(r"\n\s*\n+","\n",txt)
-open(sys.argv[2],"w").write(txt)
-PY
+    html_to_text "$raw" "$WORK/$name.txt" || { FETCH_ERR="could not extract text from web page"; return 1; }
+    KIND=txt
   fi
-  [ "$(wc -c < "$out")" -gt 2000 ]
+  [ "$(wc -c < "$WORK/$name.txt")" -gt 2000 ] || { FETCH_ERR="page had too little text"; return 1; }
 }
 
 refresh_one() { # name primary [fallback]
-  local name="$1" primary="$2" fallback="${3:-}" txt="$WORK/$1.txt" used=""
-  rm -f "$txt"
-  if fetch_text "$primary" "$txt"; then used="$primary"
-  elif [ -n "$fallback" ] && fetch_text "$fallback" "$txt"; then used="$fallback"
-  else echo "[$name] ERROR: could not fetch a readable guide (tried: $primary ${fallback:+$fallback})" >&2; return 1; fi
+  local name="$1" primary="$2" fallback="${3:-}" used="" err1=""
+  if fetch_guide "$primary" "$name"; then used="$primary"
+  else
+    err1="$FETCH_ERR"
+    if [ -n "$fallback" ] && fetch_guide "$fallback" "$name"; then used="$fallback"
+    else echo "[$name] ERROR: no readable guide. $primary: $err1${fallback:+. $fallback: $FETCH_ERR}" >&2; return 1; fi
+  fi
 
-  local new old edition dated
-  new="$(shasum -a 256 "$txt" | cut -d' ' -f1)"
+  local file="$WORK/$name.$KIND" new old
+  new="$(hash_file "$file")"
   old="$(cat "$REF/$name.sha256" 2>/dev/null || echo none)"
-  edition="$(grep -m1 -oE '20[0-9]{2}[-–]20?[0-9]{2}' "$txt" || true)"
-  dated="$(grep -m1 -oiE '(last (updated|modified)|updated|effective)[: ]+[A-Za-z]+ [0-9]{1,2},? 20[0-9]{2}|(January|February|March|April|May|June|July|August|September|October|November|December) [0-9]{1,2}, 20[0-9]{2}' "$txt" || true)"
   echo "[$name] source: $used"
-  echo "[$name] school year: ${edition:-unknown}   date: ${dated:-unknown}"
-  if [ "$new" = "$old" ]; then echo "[$name] UNCHANGED since last refresh."; return 0; fi
-  if [ -f "$REF/$name.txt" ]; then
+
+  if [ "$KIND" = txt ]; then
+    local edition dated
+    edition="$(grep -m1 -oE '20[0-9]{2}[-–]20?[0-9]{2}' "$file" || true)"
+    dated="$(grep -m1 -oiE '(last (updated|modified)|updated|effective)[: ]+[A-Za-z]+ [0-9]{1,2},? 20[0-9]{2}|(January|February|March|April|May|June|July|August|September|October|November|December) [0-9]{1,2}, 20[0-9]{2}' "$file" || true)"
+    echo "[$name] school year: ${edition:-unknown}   date: ${dated:-unknown}"
+  fi
+
+  if [ "$new" = "$old" ]; then echo "[$name] UNCHANGED since last refresh."; date +%Y-%m-%d > "$REF/$name.fetched"; return 0; fi
+
+  if [ "$KIND" = pdf ]; then
+    echo "[$name] $( [ "$old" = none ] && echo 'FIRST SAVE' || echo 'CHANGED' ). Saved as PDF (pdftotext not installed)."
+    echo "[$name] CLAUDE: read $REF/$name.pdf with the Read tool. Do NOT pass the pages parameter (it needs poppler). Reading the whole file works."
+    rm -f "$REF/$name.txt"
+  elif [ -f "$REF/$name.txt" ]; then
     echo "[$name] CHANGED. Diff vs saved copy (first 120 lines):"
-    diff -u "$REF/$name.txt" "$txt" | head -120 || true
+    diff -u "$REF/$name.txt" "$file" | head -120 || true
   else
     echo "[$name] FIRST SAVE. Nothing to compare."
+    rm -f "$REF/$name.pdf"
   fi
-  cp "$txt" "$REF/$name.txt"; echo "$new" > "$REF/$name.sha256"
+  cp "$file" "$REF/$name.$KIND"; echo "$new" > "$REF/$name.sha256"
   echo "$used" > "$REF/$name.source"; date +%Y-%m-%d > "$REF/$name.fetched"
-  echo "[$name] saved reference/$name.txt"
+  echo "[$name] saved $REF/$name.$KIND"
 }
 
 ARG="${1:-all}"
@@ -87,5 +115,5 @@ case "$ARG" in
   *) if u="$(guide_urls "$ARG")"; then IFS='|' read -r a b <<<"$u"; refresh_one "$ARG" "$a" "$b" || rc=1
      else echo "Unknown program '$ARG'. Use FES-UA, FTC-FES-EO, PEP, all, or a URL." >&2; rc=2; fi ;;
 esac
-echo "NEXT: update category-map.md from any diff, then compare the portal dropdowns."
+echo "NEXT: update category-map.md from any diff or new PDF, then compare the portal dropdowns."
 exit $rc

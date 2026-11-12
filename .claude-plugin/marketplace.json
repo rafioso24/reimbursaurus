@@ -1,0 +1,11 @@
+{
+  "name": "reimbursaurus",
+  "owner": { "name": "rafioso24" },
+  "plugins": [
+    {
+      "name": "reimbursaurus",
+      "source": "./",
+      "description": "Turns receipt PDFs into Step Up For Students reimbursement requests (FES-UA, FES-EO, FTC, PEP) using Claude in Chrome."
+    }
+  ]
+}

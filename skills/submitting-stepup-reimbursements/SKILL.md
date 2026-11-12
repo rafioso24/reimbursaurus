@@ -8,6 +8,15 @@ description: Use when the user wants to submit reimbursements for school materia
 ## Overview
 Each receipt becomes one reimbursement in the EMA portal. Use Claude in Chrome. Run one browser tab per receipt, in parallel. Stop before the final submit and get a clear yes from the user.
 
+## Requirements
+Nothing to install beyond Claude Code and the Claude in Chrome extension. Check the extension before anything else, even before reading receipts:
+1. No `mcp__claude-in-chrome__*` tools and no `enable__mcp__claude-in-chrome` tool: stop. Tell the user to install the extension from https://claude.com/chrome, sign in to it with the same Claude account as Claude Code, then restart Claude Code (or run `/chrome`) and ask again.
+2. Only `enable__mcp__claude-in-chrome` exists: call it to turn the tools on.
+3. Tools load but `tabs_context_mcp` or `list_connected_browsers` shows no browser: ask the user to open Chrome, check the extension is signed in, and run `/chrome` in Claude Code to connect. Wait for them, then retry once.
+Do not try to submit by other means (curl, other browsers) if the extension is missing.
+- Paths: `scripts/` and `category-map.md` are in this skill's base directory. Saved guides live in `~/.reimbursaurus/reference/`.
+- PDFs: read receipts and guides with the Read tool. Do not pass the `pages` parameter. It needs poppler, which most users lack. Reading the whole file works.
+
 ## Setup
 1. Load the Chrome tools in one ToolSearch call. Invoke the `claude-in-chrome` skill first.
 2. If several browsers are connected, ask the user which one. The right profile is the one signed in to the portal. If the user picks "confirmation screen", call `switch_browser`.
@@ -23,7 +32,7 @@ Step Up runs several scholarship programs. The student dropdown shows each child
 | FTC-PEP, PEP | `PEP` | PEP Purchasing Guide. No digital devices or peripherals. Theme parks limited to one $299 reimbursement per year |
 | NWSA (New Worlds) | none | The portal blocks reimbursements. Tell the user to use Marketplace or Direct Pay |
 - The portal's reimbursement flow is the same for every program. Only eligibility differs.
-- Before the first submission for a program, check `reference/<guide key>.fetched`. If it is missing or older than 30 days, run the refresh (next section).
+- Before the first submission for a program, check `~/.reimbursaurus/reference/<guide key>.fetched`. If it is missing or older than 30 days, run the refresh (next section).
 - Portal Category, Type, and Description lists may differ by program. On the first draft for a new program, compare them with `category-map.md` and note differences there.
 - Pick the best category and submit, whatever the program. If the guide for that child's program lists the item as not reimbursable, say so in the final report so the user knows a denial is likely.
 
@@ -69,9 +78,10 @@ Direct links to /SubmitReimbursement redirect to the Dashboard. Always start at 
 See `category-map.md` for the full portal list, the item-to-category table, and a likely-ineligible list for information only. Check it before choosing a category for anything that is not a book. Pick the best fit and submit. Do not judge reimbursability: Step Up decides, and a denial is acceptable to the user.
 
 ## Refresh the reimbursable-items list
-Step Up updates its purchasing guides often. Run `bash scripts/refresh-guide.sh` (all programs), or `bash scripts/refresh-guide.sh FES-UA` (one program), when: the user asks, a program's `reference/<key>.fetched` is missing or older than 30 days, or a new school year starts.
-1. The script downloads each guide to a temp folder, extracts the text, and prints the school year, the date, and a diff against the saved copy in `reference/`.
+Step Up updates its purchasing guides often. Run `bash scripts/refresh-guide.sh` (all programs), or `bash scripts/refresh-guide.sh FES-UA` (one program), when: the user asks, a program's `~/.reimbursaurus/reference/<key>.fetched` is missing or older than 30 days, or a new school year starts.
+1. The script downloads each guide to a temp folder, extracts the text, and prints the school year, the date, and a diff against the saved copy in `~/.reimbursaurus/reference/`.
 2. UNCHANGED: nothing to do. CHANGED or FIRST SAVE: read the diff, then update `category-map.md` (item table, program differences, Description options, frequency limits). Wording-only diffs need no update.
+   - "Saved as PDF" means `pdftotext` is not installed, so there is no text diff. Read the saved `.pdf` with the Read tool (no `pages` parameter) and compare it with `category-map.md` yourself. Do not ask the user to install anything.
 3. If the school year shown is older than the current one, find the new guide link on https://www.stepupforstudents.org/purchasing-guides/ (and https://fcsua.org/FESUA/ for FES-UA), then edit the URL in `scripts/refresh-guide.sh`, or pass the link as an argument: `bash scripts/refresh-guide.sh <url>`.
 4. The portal's dropdowns are the final word. After a refresh, open one draft and compare the Category, Type, and Description lists with `category-map.md`.
 

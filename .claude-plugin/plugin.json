@@ -1,0 +1,10 @@
+{
+  "name": "reimbursaurus",
+  "description": "Turns receipt PDFs into Step Up For Students reimbursement requests (FES-UA, FES-EO, FTC, PEP) using Claude in Chrome.",
+  "version": "1.1.0",
+  "author": { "name": "rafioso24" },
+  "homepage": "https://github.com/rafioso24/reimbursaurus",
+  "repository": "https://github.com/rafioso24/reimbursaurus",
+  "license": "MIT",
+  "keywords": ["step-up-for-students", "reimbursement", "fes-ua", "pep", "ftc", "florida", "scholarship"]
+}

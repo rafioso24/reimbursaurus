@@ -36,12 +36,31 @@ A [Claude Code](https://claude.com/claude-code) skill that turns a folder of rec
 
 ## Install
 
-Requires Claude Code, the Claude in Chrome extension, and `pdftotext` (`brew install poppler` on macOS).
+You need two things: [Claude Code](https://claude.com/claude-code) and the [Claude in Chrome](https://claude.com/chrome) extension. Nothing else to install. The skill works on macOS, Linux, and Windows.
+
+In Claude Code, run:
+
+```
+/plugin install reimbursaurus --marketplace rafioso24/reimbursaurus
+```
+
+On an older Claude Code, use two steps:
+
+```
+/plugin marketplace add rafioso24/reimbursaurus
+/plugin install reimbursaurus@reimbursaurus
+```
+
+To update later, run `/plugin marketplace update reimbursaurus`.
+
+<details>
+<summary>Manual install (no plugin system)</summary>
 
 ```bash
 git clone https://github.com/rafioso24/reimbursaurus.git
 cp -r reimbursaurus/skills/submitting-stepup-reimbursements ~/.claude/skills/
 ```
+</details>
 
 ## Use
 
@@ -53,19 +72,15 @@ For several children, use one subfolder per child (`Alex/`, `Sam/`), or tell Cla
 
 ## Keep the item list fresh
 
-Step Up updates its purchasing guides often, and the rules differ by program. Ask Claude to "refresh the reimbursable items list", or run:
+Step Up updates its purchasing guides often, and the rules differ by program. Ask Claude to "refresh the reimbursable items list." Claude runs `scripts/refresh-guide.sh` for all programs or one (FES-UA, FTC-FES-EO, PEP).
 
-```bash
-bash ~/.claude/skills/submitting-stepup-reimbursements/scripts/refresh-guide.sh          # all programs
-bash ~/.claude/skills/submitting-stepup-reimbursements/scripts/refresh-guide.sh FES-UA   # one program (FES-UA, FTC-FES-EO, PEP)
-```
-
-The script downloads each current guide, saves its text under `reference/`, and shows what changed since the last run. It does not ship copies of the guides, because they belong to Step Up. When a new school year starts, update the guide URLs at the top of the script.
+The script downloads each current guide, saves it under `~/.reimbursaurus/reference/`, and shows what changed since the last run. It uses only `bash`, `curl`, and `perl`, which come with macOS, Linux, and Git Bash. If `pdftotext` is installed, it extracts PDF text and shows a diff. If not, it saves the PDF and Claude reads it directly. It does not ship copies of the guides, because they belong to Step Up. When a new school year starts, update the guide URLs at the top of the script.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
+| `.claude-plugin/` | Plugin and marketplace manifests for one-command install |
 | `skills/submitting-stepup-reimbursements/SKILL.md` | The skill: flow, field rules, safety rules |
 | `skills/submitting-stepup-reimbursements/category-map.md` | Portal categories, an item-to-category table, and differences between programs |
 | `skills/submitting-stepup-reimbursements/scripts/refresh-guide.sh` | Fetches the current purchasing guides and diffs them |
